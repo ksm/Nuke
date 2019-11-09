@@ -24,7 +24,12 @@ extension URLSessionTask: Cancellable {}
 public final class DataLoader: DataLoading {
     public let session: URLSession
     private let impl: _DataLoader
-    public var didReceiveData: ((_ data: Data?, _ error: Swift.Error?) -> Void)?
+
+    public var observer: DataLoaderObserving? {
+        get { return impl.observer }
+        set { impl.observer = newValue }
+    }
+
     /// Initializes `DataLoader` with the given configuration.
     /// - parameter configuration: `URLSessionConfiguration.default` with
     /// `URLCache` with 0 MB memory capacity and 150 MB disk capacity.
@@ -34,10 +39,6 @@ public final class DataLoader: DataLoading {
         self.session = URLSession(configuration: configuration, delegate: impl, delegateQueue: impl.queue)
         self.impl.session = self.session
         self.impl.validate = validate
-        self.impl.didReceiveData = {[weak self] data, error in
-            guard let _strongSelf = self else { return }
-            _strongSelf.didReceiveData?(data, error)
-        }
     }
 
     /// Returns a default configuration which has a `sharedUrlCache` set
@@ -57,9 +58,9 @@ public final class DataLoader: DataLoading {
         return (200..<300).contains(response.statusCode) ? nil : Error.statusCodeUnacceptable(response.statusCode)
     }
 
-#if !os(macOS) && !targetEnvironment(macCatalyst)
+    #if !os(macOS) && !targetEnvironment(macCatalyst)
     private static let cachePath = "com.github.kean.Nuke.Cache"
-#else
+    #else
     private static let cachePath: String = {
         let cachePaths = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true)
         if let cachePath = cachePaths.first, let identifier = Bundle.main.bundleIdentifier {
@@ -68,7 +69,7 @@ public final class DataLoader: DataLoading {
 
         return ""
     }()
-#endif
+    #endif
 
     /// Shared url cached used by a default `DataLoader`. The cache is
     /// initialized with 0 MB memory capacity and 150 MB disk capacity.
@@ -109,7 +110,8 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
     var validate: (URLResponse) -> Swift.Error? = DataLoader.validate
     let queue = OperationQueue()
     private var handlers = [URLSessionTask: _Handler]()
-    var didReceiveData: ((_ data: Data?, _ error: Error?) -> Void)?
+    var observer: DataLoaderObserving?
+
     override init() {
         self.queue.maxConcurrentOperationCount = 1
     }
@@ -124,6 +126,7 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
             self.handlers[task] = handler
         }
         task.resume()
+        observer?.dataLoader(session: session, didResumeDataTask: task)
         return task
     }
 
@@ -133,6 +136,8 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
                     dataTask: URLSessionDataTask,
                     didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        observer?.dataLoader(session: session, dataTask: dataTask, didReceive: response)
+
         guard let handler = handlers[dataTask] else {
             completionHandler(.cancel)
             return
@@ -146,10 +151,11 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        observer?.dataLoader(session: session, task: task, didCompleteWithError: error)
+
         guard let handler = handlers[task] else {
             return
         }
-        didReceiveData?(nil, error)
         handlers[task] = nil
         handler.completion(error)
     }
@@ -157,10 +163,11 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
     // MARK: URLSessionDataDelegate
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        observer?.dataLoader(session: session, dataTask: dataTask, didReceive: data)
+
         guard let handler = handlers[dataTask], let response = dataTask.response else {
             return
         }
-        didReceiveData?(data, nil)
         // Don't store data anywhere, just send it to the pipeline.
         handler.didReceiveData(data, response)
     }
@@ -174,4 +181,22 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
             self.completion = completion
         }
     }
+}
+
+// MARK: - DataLoaderObserving
+
+/// Allows you to tap into internal events handled by the data loader.
+/// Events are delivered on the internal data loader queue.
+public protocol DataLoaderObserving {
+    func dataLoader(session: URLSession, didResumeDataTask: URLSessionDataTask)
+    func dataLoader(session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse)
+    func dataLoader(session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?)
+    func dataLoader(session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data)
+}
+
+public extension DataLoaderObserving {
+    func dataLoader(session: URLSession, didResumeDataTask: URLSessionDataTask) {}
+    func dataLoader(session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse) {}
+    func dataLoader(session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {}
+    func dataLoader(session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {}
 }
