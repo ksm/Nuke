@@ -4,6 +4,8 @@
 
 import Foundation
 
+// MARK: - ImagePipeline.Configuration
+
 extension ImagePipeline {
     public struct Configuration {
         // MARK: - Dependencies
