@@ -1583,6 +1583,7 @@
 				PRODUCT_NAME = Nuke;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_VERSION = 4.2;
 			};
 			name = Debug;
 		};
@@ -1604,6 +1605,7 @@
 				PRODUCT_NAME = Nuke;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_VERSION = 4.2;
 			};
 			name = Release;
 		};
